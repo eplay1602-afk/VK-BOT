@@ -4,7 +4,7 @@ import os
 import time
 import re
 import pymysql
-
+print("pymysql OK")
 
 TOKEN = os.getenv("VK_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
