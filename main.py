@@ -5,6 +5,9 @@ import os
 TOKEN = os.getenv("VK_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))
 
+print("🚀 BOT STARTED")
+print("GROUP_ID =", GROUP_ID)
+
 vk_session = vk_api.VkApi(token=TOKEN)
 vk = vk_session.get_api()
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
@@ -17,10 +20,17 @@ def send(peer_id, text):
     )
 
 for event in longpoll.listen():
+    print("EVENT:", event.type)
+
     if event.type == VkBotEventType.MESSAGE_NEW:
         msg = event.object.message
-        text = msg["text"].lower()
-        peer_id = msg["peer_id"]
 
-        if text == "привет":
-            send(peer_id, "Я живой модератор-бот 👮")
+        text = msg.get("text", "")
+        peer_id = msg.get("peer_id")
+
+        print("MESSAGE:", text, peer_id)
+
+        # отвечает в беседах
+        if peer_id > 2000000000:
+            if text.lower() == "привет":
+                send(peer_id, "Я подключен к чату 👮")
