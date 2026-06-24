@@ -11,25 +11,33 @@ vk_session = vk_api.VkApi(token=TOKEN)
 vk = vk_session.get_api()
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 
-# ======================
-# ADMINS + OWNER
-# ======================
-OWNER = 786886188
 ADMINS = [786886188, 1092169800]
+OWNER = 786886188
 
-# ======================
-# DATA STORAGE (RAM)
-# ======================
-roles = {}
-role_names = {"admin": "Админ", "mod": "Модератор", "user": "Пользователь"}
+roles = {}        # user_id -> role
+role_priority = { # роль -> приоритет
+    "owner": 100,
+    "admin": 80,
+    "mod": 50,
+    "user": 10
+}
 
 nicks = {}
 warns = {}
-permissions = {}
 
-# ======================
+# ========================
+# VK USER INFO (NAME SYSTEM)
+# ========================
+def get_user_info(user_id):
+    try:
+        u = vk.users.get(user_ids=user_id)[0]
+        return f"{u['first_name']} {u['last_name']} (@id{user_id})"
+    except:
+        return f"Unknown (@id{user_id})"
+
+# ========================
 # SEND
-# ======================
+# ========================
 def send(peer_id, text):
     vk.messages.send(
         peer_id=peer_id,
@@ -37,12 +45,17 @@ def send(peer_id, text):
         random_id=int(time.time() * 1000)
     )
 
-def is_admin(uid):
-    return uid in ADMINS
+# ========================
+# REPLY USER
+# ========================
+def get_reply(event):
+    msg = event.object.message
+    r = msg.get("reply_message")
+    return r.get("from_id") if r else None
 
-# ======================
-# GET USER (reply/id/@)
-# ======================
+# ========================
+# RESOLVE USER
+# ========================
 def resolve_user(text, reply=None):
     if reply:
         return reply
@@ -58,48 +71,38 @@ def resolve_user(text, reply=None):
         return int(text)
 
     try:
-        res = vk.utils.resolveScreenName(screen_name=text.replace("@",""))
-        if res and "object_id" in res:
-            return res["object_id"]
+        r = vk.utils.resolveScreenName(screen_name=text.replace("@",""))
+        if r and "object_id" in r:
+            return r["object_id"]
     except:
         pass
 
     return None
 
-def get_reply(event):
-    msg = event.object.message
-    r = msg.get("reply_message")
-    return r.get("from_id") if r else None
-
-# ======================
+# ========================
 # HELP
-# ======================
+# ========================
 def help_text():
     return (
         "📌 КОМАНДЫ:\n\n"
-        "👤 USER:\n"
-        "/nlist\n"
-        "/snick name (reply)\n"
-        "/rnick (reply)\n\n"
-        "🛡 MOD:\n"
+        "🛡 MODERATION:\n"
         "/warn (reply)\n"
-        "/pin (reply)\n"
-        "/mute sec (reply)\n"
-        "/unmute (reply)\n\n"
+        "/pin (reply)\n\n"
+        "👤 USER:\n"
+        "/snick text (reply)\n"
+        "/rnick (reply)\n"
+        "/nlist\n\n"
         "👮 ADMIN:\n"
         "/staff\n"
         "/roles\n"
-        "/srole id role\n"
-        "/rnroles role\n"
-        "/givecmd id cmd\n"
         "/zov"
     )
 
-# ======================
-# MAIN
-# ======================
-print("🚀 FULL PRO BOT STARTED")
+print("🚀 FORMAT PRO BOT STARTED")
 
+# ========================
+# MAIN LOOP
+# ========================
 for event in longpoll.listen():
 
     if event.type != VkBotEventType.MESSAGE_NEW:
@@ -111,102 +114,68 @@ for event in longpoll.listen():
     user_id = msg.get("from_id")
     conv_id = msg.get("conversation_message_id")
 
-    # ======================
+    # ========================
     # HELP
-    # ======================
+    # ========================
     if text == "/help":
         send(peer_id, help_text())
 
-    # ======================
-    # STAFF
-    # ======================
+    # ========================
+    # STAFF (FULL NAME + ROLE)
+    # ========================
     if text == "/staff":
-        admins = "\n".join([str(x) for x in ADMINS])
-        send(peer_id, "👮 STAFF:\n" + admins)
+        lines = []
+        for uid in ADMINS:
+            name = get_user_info(uid)
+            role = "OWNER" if uid == OWNER else "ADMIN"
+            lines.append(f"{name} — {role}")
 
-    # ======================
-    # ROLES LIST
-    # ======================
+        send(peer_id, "👮 STAFF:\n" + "\n".join(lines))
+
+    # ========================
+    # ROLES (name - priority)
+    # ========================
     if text == "/roles":
-        send(peer_id, "🏷 Роли:\n" + str(role_names))
+        lines = []
+        for r, p in role_priority.items():
+            lines.append(f"{r} — приоритет {p}")
 
-    # ======================
-    # SET ROLE
-    # ======================
-    if text.startswith("/srole") and is_admin(user_id):
-        try:
-            _, uid, role = text.split()
-            roles[int(uid)] = role
-            send(peer_id, "✅ роль выдана")
-        except:
-            send(peer_id, "формат: /srole id role")
+        send(peer_id, "🏷 РОЛИ:\n" + "\n".join(lines))
 
-    # ======================
-    # REMOVE ROLE
-    # ======================
-    if text.startswith("/rnroles") and is_admin(user_id):
-        try:
-            role = text.split()[1]
-            if role in role_names:
-                del role_names[role]
-                send(peer_id, "❌ роль удалена")
-        except:
-            send(peer_id, "формат: /rnroles role")
-
-    # ======================
-    # NEW ROLE
-    # ======================
-    if text.startswith("/srole") and is_admin(user_id):
-        pass
-
-    # ======================
-    # WARN SYSTEM
-    # ======================
-    if text.startswith("/warn") and is_admin(user_id):
-        target = get_reply(event)
-        if not target:
-            send(peer_id, "reply нужен")
-        else:
-            warns[target] = warns.get(target, 0) + 1
-            send(peer_id, f"⚠️ warn +1 ({warns[target]}/3)")
-
-            if warns[target] >= 3:
-                send(peer_id, f"🚫 пользователь забанен (3 варна)")
-                vk.groups.banUser(
-                    group_id=GROUP_ID,
-                    user_id=target,
-                    end_date=0
-                )
-
-    # ======================
+    # ========================
     # NICK SET
-    # ======================
+    # ========================
     if text.startswith("/snick"):
         target = get_reply(event)
-        name = text.replace("/snick", "").strip()
+        nick = text.replace("/snick", "").strip()
 
         if target:
-            nicks[target] = name
+            nicks[target] = nick
             send(peer_id, "✅ ник установлен")
 
-    # ======================
+    # ========================
+    # NICK LIST (NAME + NICK)
+    # ========================
+    if text == "/nlist":
+        lines = []
+        for uid, nick in nicks.items():
+            name = get_user_info(uid)
+            lines.append(f"{name} — Ник: \"{nick}\"")
+
+        send(peer_id, "\n".join(lines) if lines else "пусто")
+
+    # ========================
     # REMOVE NICK
-    # ======================
+    # ========================
     if text == "/rnick":
         target = get_reply(event)
         if target and target in nicks:
             del nicks[target]
             send(peer_id, "❌ ник удалён")
 
-    # ======================
-    # NICK LIST
-    # ======================
-    if text == "/nlist":
-        send(peer_id, str(nicks))
-
-    # ======================
-    # ZOV (ping all)
-    # ======================
+    # ========================
+    # ZOV (ALL USERS)
+    # ========================
     if text == "/zov":
         try:
             members = vk.messages.getConversationMembers(peer_id=peer_id)
@@ -220,10 +189,10 @@ for event in longpoll.listen():
         except:
             send(peer_id, "ошибка zov")
 
-    # ======================
+    # ========================
     # PIN
-    # ======================
-    if text == "/pin" and is_admin(user_id):
+    # ========================
+    if text == "/pin":
         try:
             vk.messages.pin(peer_id=peer_id, conversation_message_id=conv_id)
             send(peer_id, "📌 закреплено")
