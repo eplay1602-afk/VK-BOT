@@ -11,7 +11,7 @@ vk = vk_session.get_api()
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 
 # 🔐 список админов (впиши свой VK ID)
-ADMINS = [123456789]
+ADMINS = [786886188]
 
 def send(peer_id, text):
     vk.messages.send(
