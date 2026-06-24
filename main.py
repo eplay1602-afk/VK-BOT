@@ -17,9 +17,8 @@ mutes = {}
 spam = {}
 
 # ========================
-# УТИЛИТЫ
+# SEND
 # ========================
-
 def send(peer_id, text):
     vk.messages.send(
         peer_id=peer_id,
@@ -31,34 +30,27 @@ def is_admin(user_id):
     return user_id in ADMINS
 
 # ========================
-# ПАРСЕР USER ID (ID / @id / text)
+# RESOLVE @username -> id
 # ========================
-def extract_user_id(text, reply_user=None):
+def resolve_user(name):
+    try:
+        if not name:
+            return None
 
-    if reply_user:
-        return reply_user
+        name = name.replace("@", "")
 
-    if not text:
-        return None
+        res = vk.utils.resolveScreenName(screen_name=name)
 
-    # id123456
-    match = re.search(r"id(\d+)", text)
-    if match:
-        return int(match.group(1))
+        if res and "object_id" in res:
+            return res["object_id"]
 
-    # @id123456
-    match = re.search(r"@id(\d+)", text)
-    if match:
-        return int(match.group(1))
-
-    # чистое число
-    if text.isdigit():
-        return int(text)
+    except:
+        pass
 
     return None
 
 # ========================
-# REPLY USER ID
+# GET REPLY USER
 # ========================
 def get_reply_user(event):
     msg = event.object.message
@@ -67,11 +59,34 @@ def get_reply_user(event):
         return reply.get("from_id")
     return None
 
-print("🚀 PRO MOD BOT FULL STARTED")
+# ========================
+# EXTRACT USER
+# ========================
+def get_user(text_part, reply_user=None):
+
+    if reply_user:
+        return reply_user
+
+    if not text_part:
+        return None
+
+    # id123
+    m = re.search(r"id(\d+)", text_part)
+    if m:
+        return int(m.group(1))
+
+    # 123456
+    if text_part.isdigit():
+        return int(text_part)
+
+    # @username
+    return resolve_user(text_part)
 
 # ========================
-# MAIN LOOP
+# MAIN
 # ========================
+print("🚀 FIXED PRO BOT STARTED")
+
 for event in longpoll.listen():
 
     if event.type != VkBotEventType.MESSAGE_NEW:
@@ -83,22 +98,22 @@ for event in longpoll.listen():
     user_id = msg.get("from_id")
     conv_id = msg.get("conversation_message_id")
 
-    # ========================
-    # SPAM PROTECTION
-    # ========================
     now = time.time()
 
+    # ========================
+    # SPAM
+    # ========================
     spam.setdefault(user_id, [])
     spam[user_id].append(now)
     spam[user_id] = [t for t in spam[user_id] if now - t < 3]
 
     if len(spam[user_id]) > 5:
         mutes[user_id] = now + 60
-        send(peer_id, "⛔ Антиспам → мут 60 сек")
+        send(peer_id, "⛔ мут 60 сек (антиспам)")
         continue
 
     # ========================
-    # PIN (reply only)
+    # PIN (reply)
     # ========================
     if text.startswith("/pin") and is_admin(user_id):
         try:
@@ -106,71 +121,52 @@ for event in longpoll.listen():
                 peer_id=peer_id,
                 conversation_message_id=conv_id
             )
-            send(peer_id, "📌 сообщение закреплено")
+            send(peer_id, "📌 закреплено")
         except:
             send(peer_id, "ошибка pin")
 
     # ========================
-    # MUTE (reply + id + @user)
+    # MUTE (reply / id / @username)
     # ========================
     if text.startswith("/mute") and is_admin(user_id):
         try:
             parts = text.split()
-            sec = int(parts[1]) if len(parts) > 1 else 0
+
+            sec = int(parts[1])
 
             reply_user = get_reply_user(event)
-            target = extract_user_id(parts[2] if len(parts) > 2 else "", reply_user)
+
+            target_text = parts[2] if len(parts) > 2 else ""
+            target = get_user(target_text, reply_user)
 
             if not target:
-                send(peer_id, "❌ укажи пользователя (reply / id / @id)")
+                send(peer_id, "❌ не найден пользователь (reply / id / @username)")
             else:
-                mutes[target] = time.time() + sec
+                mutes[target] = now + sec
                 send(peer_id, f"⏳ мут {target} на {sec} сек")
 
         except:
-            send(peer_id, "формат: /mute 120 (reply / id / @id)")
+            send(peer_id, "формат: /mute 120 (reply / id / @user)")
 
     # ========================
     # UNMUTE
     # ========================
     if text.startswith("/unmute") and is_admin(user_id):
         try:
-            reply_user = get_reply_user(event)
             parts = text.split()
-
-            target = extract_user_id(parts[1] if len(parts) > 1 else "", reply_user)
-
-            if target in mutes:
-                del mutes[target]
-                send(peer_id, f"✅ мут снят {target}")
-            else:
-                send(peer_id, "пользователь не в муте")
-
-        except:
-            send(peer_id, "формат: /unmute (reply / id / @id)")
-
-    # ========================
-    # BAN
-    # ========================
-    if text.startswith("/ban") and is_admin(user_id):
-        try:
             reply_user = get_reply_user(event)
-            parts = text.split()
 
-            target = extract_user_id(parts[1] if len(parts) > 1 else "", reply_user)
+            target_text = parts[1] if len(parts) > 1 else ""
+            target = get_user(target_text, reply_user)
 
             if not target:
-                send(peer_id, "❌ укажи пользователя")
+                send(peer_id, "❌ не найден пользователь")
             else:
-                vk.groups.banUser(
-                    group_id=GROUP_ID,
-                    user_id=target,
-                    end_date=0
-                )
-                send(peer_id, f"🚫 бан {target}")
+                mutes.pop(target, None)
+                send(peer_id, f"✅ мут снят {target}")
 
         except:
-            send(peer_id, "ошибка ban")
+            send(peer_id, "формат: /unmute (reply / id / @user)")
 
     # ========================
     # HELP
@@ -178,11 +174,8 @@ for event in longpoll.listen():
     if text == "/help":
         send(peer_id,
              "📌 КОМАНДЫ:\n\n"
-             "👤 Пользователь:\n"
-             "/help\n\n"
-             "🛡 Модерация:\n"
+             "🛡 модерация:\n"
              "/pin (reply)\n"
              "/mute 120 (reply / id / @user)\n"
              "/unmute (reply / id / @user)\n"
-             "/ban (reply / id / @user)\n"
         )
