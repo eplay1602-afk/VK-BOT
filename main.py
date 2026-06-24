@@ -13,11 +13,24 @@ longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 # 👮 админы
 ADMINS = [786886188, 1092169800]
 
+# 🧠 роли пользователей
+roles = {}
+
+# 🔐 кастомные права (user_id: [cmds])
+permissions = {}
+
 # ⏳ муты
 mutes = {}
 
 # 🧠 антиспам
-spam_memory = {}
+spam = {}
+
+# 🏷 кастомные названия ролей
+role_names = {
+    "mod": "Модератор",
+    "admin": "Администратор",
+    "user": "Пользователь"
+}
 
 def send(peer_id, text):
     vk.messages.send(
@@ -29,10 +42,15 @@ def send(peer_id, text):
 def is_admin(user_id):
     return user_id in ADMINS
 
-def is_muted(user_id):
-    return user_id in mutes and mutes[user_id] > time.time()
+def get_role(user_id):
+    return roles.get(user_id, "user")
 
-print("🚀 PRO MOD BOT STARTED")
+def has_perm(user_id, cmd):
+    if is_admin(user_id):
+        return True
+    return cmd in permissions.get(user_id, [])
+
+print("🚀 PRO MOD SYSTEM STARTED")
 
 for event in longpoll.listen():
 
@@ -45,18 +63,19 @@ for event in longpoll.listen():
     user_id = msg.get("from_id")
     conv_id = msg.get("conversation_message_id")
 
-    # ========================
-    # ПРИВЕТСТВИЕ В БЕСЕДЕ
-    # ========================
-    if event.from_chat:
-        if text == "":
-            send(peer_id,
-                 "🔥 Спасибо что добавили меня в чат, пожалуйста выдайте звездочку для полной работы")
+    role = get_role(user_id)
 
     # ========================
-    # МУТ
+    # ПРИВЕТСТВИЕ
     # ========================
-    if is_muted(user_id):
+    if event.from_chat and text == "":
+        send(peer_id,
+             "🔥 Спасибо что добавили меня в чат, пожалуйста выдайте звездочку для полной работы")
+
+    # ========================
+    # МУТ ПРОВЕРКА
+    # ========================
+    if user_id in mutes and mutes[user_id] > time.time():
         try:
             vk.messages.delete(
                 message_ids=str(conv_id),
@@ -71,31 +90,40 @@ for event in longpoll.listen():
     # ========================
     now = time.time()
 
-    if user_id not in spam_memory:
-        spam_memory[user_id] = []
+    spam.setdefault(user_id, [])
+    spam[user_id].append(now)
+    spam[user_id] = [t for t in spam[user_id] if now - t < 3]
 
-    spam_memory[user_id].append(now)
-    spam_memory[user_id] = [t for t in spam_memory[user_id] if now - t < 3]
-
-    if len(spam_memory[user_id]) > 5:
+    if len(spam[user_id]) > 5:
         mutes[user_id] = now + 60
-        send(peer_id, "⛔ Антиспам: мут на 60 сек")
+        send(peer_id, "⛔ Антиспам → мут 60 сек")
         continue
 
     # ========================
-    # КОМАНДЫ
+    # HELP (РАЗДЕЛЫ)
     # ========================
-
-    # /help
     if text == "/help":
-        send(peer_id,
-             "/pin — закреп\n"
-             "/ban id — бан\n"
-             "/mute id sec — мут\n"
-             "/unmute id — снять мут")
 
-    # /pin
-    if text.startswith("/pin") and is_admin(user_id):
+        send(peer_id,
+             "📌 КОМАНДЫ ПОЛЬЗОВАТЕЛЯ:\n"
+             "/help\n"
+             "— базовые команды\n\n"
+
+             "🛡 МОДЕРАЦИЯ:\n"
+             "/mute id sec\n"
+             "/unmute id\n"
+             "/pin\n\n"
+
+             "👮 АДМИН:\n"
+             "/ban id\n"
+             "/givecmd id cmd\n"
+             "/editroles role new_name\n"
+        )
+
+    # ========================
+    # PIN
+    # ========================
+    if text.startswith("/pin") and has_perm(user_id, "pin"):
         try:
             vk.messages.pin(
                 peer_id=peer_id,
@@ -105,8 +133,10 @@ for event in longpoll.listen():
         except:
             send(peer_id, "ошибка pin")
 
-    # /ban
-    if text.startswith("/ban") and is_admin(user_id):
+    # ========================
+    # BAN
+    # ========================
+    if text.startswith("/ban") and has_perm(user_id, "ban"):
         try:
             target = int(text.split()[1])
 
@@ -120,8 +150,10 @@ for event in longpoll.listen():
         except:
             send(peer_id, "формат: /ban id")
 
-    # /mute
-    if text.startswith("/mute") and is_admin(user_id):
+    # ========================
+    # MUTE
+    # ========================
+    if text.startswith("/mute") and has_perm(user_id, "mute"):
         try:
             parts = text.split()
             target = int(parts[1])
@@ -132,12 +164,43 @@ for event in longpoll.listen():
         except:
             send(peer_id, "формат: /mute id sec")
 
-    # /unmute
-    if text.startswith("/unmute") and is_admin(user_id):
+    # ========================
+    # UNMUTE
+    # ========================
+    if text.startswith("/unmute") and has_perm(user_id, "mute"):
         try:
             target = int(text.split()[1])
-            if target in mutes:
-                del mutes[target]
-            send(peer_id, f"✅ мут снят {target}")
+            mutes.pop(target, None)
+            send(peer_id, f"✅ мут снят")
         except:
             send(peer_id, "формат: /unmute id")
+
+    # ========================
+    # GIVE CMD (выдать доступ к команде)
+    # ========================
+    if text.startswith("/givecmd") and is_admin(user_id):
+        try:
+            _, target, cmd = text.split()
+
+            target = int(target)
+
+            permissions.setdefault(target, [])
+            if cmd not in permissions[target]:
+                permissions[target].append(cmd)
+
+            send(peer_id, f"✅ выдан доступ: {cmd} → {target}")
+        except:
+            send(peer_id, "формат: /givecmd id cmd")
+
+    # ========================
+    # EDIT ROLES
+    # ========================
+    if text.startswith("/editroles") and is_admin(user_id):
+        try:
+            _, role, new_name = text.split(maxsplit=2)
+
+            role_names[role] = new_name
+
+            send(peer_id, f"🏷 роль {role} теперь '{new_name}'")
+        except:
+            send(peer_id, "формат: /editroles role name")
